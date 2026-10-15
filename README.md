@@ -77,6 +77,12 @@ Replace YOUR-USERNAME with your GitHub username. The CI workflow then runs autom
 5. Restart the app; show the data persisted.
 6. Run `dotnet test`; show the green tests.
 
+## App preview
+
+![AI Run Ledger dashboard showing sample runs and estimated costs](docs/images/dashboard.png)
+
+The dashboard records supplied token usage and estimates costs using invented demo rates. Sample data is labelled; these are not real provider bills.
+
 ## Ideas for later (not built)
 
 Real provider usage import, editable rate card, filtering by date/model, EF Core migrations. Keep them out of version one.
