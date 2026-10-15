@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Run Ledger</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1d2430; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px; }
+  h1 { margin: 0 0 4px; }
+  .note { background: #fff7e0; border: 1px solid #ecd48a; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+  .card { background: #fff; border: 1px solid #dde1e7; border-radius: 8px; padding: 16px; margin-top: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat b { display: block; font-size: 22px; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
+  label { font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+  input, select, button { padding: 8px; font-size: 14px; border: 1px solid #b8bfca; border-radius: 6px; }
+  button { background: #1f5eff; color: #fff; border-color: #1f5eff; cursor: pointer; }
+  button.secondary { background: #fff; color: #1f5eff; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e6e9ee; }
+  .wrap { overflow-x: auto; }
+  .err { color: #b00020; font-size: 14px; margin-top: 8px; white-space: pre-line; }
+  .tag { font-size: 12px; padding: 1px 6px; border-radius: 10px; background: #e8ecf3; }
+  .tag.Sample { background: #ffe9c7; }
+  .tag.Failed { background: #fddede; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AI Run Ledger</h1>
+  <p>Record AI runs and see estimated token cost.</p>
+  <div class="note">Costs are <b>estimates</b> from invented demo rates, not real provider bills. This app records numbers you give it; it does not measure tokens. "Sample" rows are made-up demo data.</div>
+
+  <div class="card">
+    <h3>Summary</h3>
+    <div class="cards" id="summary"></div>
+    <p id="summaryNote" style="font-size:13px;color:#566"></p>
+    <table id="bySource"></table>
+  </div>
+
+  <div class="card">
+    <h3>Add a run</h3>
+    <form id="runForm">
+      <label>Model <input id="model" list="models" value="demo-small" required></label>
+      <datalist id="models"></datalist>
+      <label>Input tokens <input id="inputTokens" type="number" min="0" value="1000" required></label>
+      <label>Output tokens <input id="outputTokens" type="number" min="0" value="200" required></label>
+      <label>Duration (ms) <input id="durationMs" type="number" min="0" value="500" required></label>
+      <label>Status <select id="status"><option>Succeeded</option><option>Failed</option></select></label>
+      <button type="submit">Add run</button>
+    </form>
+    <div class="err" id="error"></div>
+    <p><button class="secondary" id="loadSamples" type="button">Load sample data</button></p>
+  </div>
+
+  <div class="card">
+    <h3>Runs</h3>
+    <div class="wrap"><table id="runs"></table></div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const usd = v => v == null ? 'unknown' : '$' + Number(v).toFixed(6).replace(/0+$/, '').replace(/\.$/, '.00');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function refresh() {
+  const [runs, s, models] = await Promise.all([
+    fetch('/api/runs').then(r => r.json()),
+    fetch('/api/summary').then(r => r.json()),
+    fetch('/api/models').then(r => r.json())
+  ]);
+  $('models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join('');
+  $('summary').innerHTML = [
+    ['Runs', s.totalRuns], ['Failed', s.failedRuns],
+    ['Input tokens', s.inputTokens.toLocaleString()], ['Output tokens', s.outputTokens.toLocaleString()],
+    ['Estimated cost', usd(s.estimatedCostUsd)], ['Runs with no known rate', s.runsWithoutCost]
+  ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
+  $('summaryNote').textContent = s.note;
+  $('bySource').innerHTML = '<tr><th>Source</th><th>Runs</th><th>Est. cost</th><th>No rate</th></tr>' +
+    s.bySource.map(x => `<tr><td>${esc(x.source)}</td><td>${x.runs}</td><td>${usd(x.estimatedCostUsd)}</td><td>${x.runsWithoutCost}</td></tr>`).join('');
+  $('runs').innerHTML = '<tr><th>#</th><th>Started (UTC)</th><th>Model</th><th>In</th><th>Out</th><th>Status</th><th>Source</th><th>Est. cost</th></tr>' +
+    runs.map(r => `<tr><td>${r.id}</td><td>${esc(r.startedAtUtc.replace('T',' ').slice(0,19))}</td><td>${esc(r.model)}</td><td>${r.inputTokens}</td><td>${r.outputTokens}</td><td><span class="tag ${r.status}">${r.status}</span></td><td><span class="tag ${r.source}">${r.source}</span></td><td>${usd(r.estimatedCostUsd)}</td></tr>`).join('');
+}
+
+$('runForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('error').textContent = '';
+  const body = {
+    model: $('model').value, inputTokens: Number($('inputTokens').value), outputTokens: Number($('outputTokens').value),
+    durationMs: Number($('durationMs').value), status: $('status').value, source: 'Manual'
+  };
+  const res = await fetch('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const p = await res.json();
+    $('error').textContent = Object.values(p.errors || {}).flat().join('\n') || 'Something went wrong.';
+    return;
+  }
+  refresh();
+});
+$('loadSamples').addEventListener('click', async () => { await fetch('/api/samples', { method: 'POST' }); refresh(); });
+refresh();
+</script>
+</body>
+</html>
